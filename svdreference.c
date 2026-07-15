@@ -100,13 +100,27 @@ static void jacobi_rotate(mat_t M, mat_t U, mat_t V, int p, int q)
     if (fabs(b) + fabs(c) < 1e-15)
         return;
 
+    /* ==== OPT[trig]: rotation-angle computation — main acceleration target ====
+     * In the fixed-point build the two atan2() calls become the piecewise-linear
+     * integer arctan (this is the custom instruction). The two calls are
+     * data-independent -> schedule their micro-ops across both firmware
+     * issue slots to run them concurrently. */
     const double theta_sum  = atan2(c + b, d - a);
     const double theta_diff = atan2(c - b, d + a);
     const double theta_l = 0.5 * (theta_sum - theta_diff);
     const double theta_r = 0.5 * (theta_sum + theta_diff);
 
+    /* ==== OPT[trig]: 4 independent sin/cos -> piecewise-linear sin/cos.
+     * sin and cos must share the same accuracy or the rotation stops being
+     * orthogonal. Pack two evaluations per microcycle in the 2-issue firmware. */
     const double cl = cos(theta_l), sl = sin(theta_l);
     const double cr = cos(theta_r), sr = sin(theta_r);
+
+    /* ==== OPT[rot]: the four rotation loops below (M-rows, M-cols, U, V) are the
+     * MAC kernels. Each iteration does two independent updates of the form
+     * (c*x - s*y) and (s*x + c*y) on the same loaded pair -> one per firmware
+     * issue slot; iterations are independent across k -> unroll (N=6 is fixed)
+     * and software-pipeline the loads, or vectorize as 4-lane NEON MACs. */
 
     /* Apply left rotation R_l to rows p and q of M (M <- R_l * M).
      * R_l = [[cl, -sl], [sl, cl]], so on rows {p,q}:
