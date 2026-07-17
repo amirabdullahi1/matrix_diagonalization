@@ -9,10 +9,11 @@
  * arctan/sin/cos and return cl/sl/cr/sr in Q(TRIG_SHIFT). sin and cos MUST be
  * computed with matched accuracy, or the rotation stops being orthogonal.
  */
+#define PI_OVER_2 1.5707963267948966
 #include "svd_common.h"
 
 /* ==== Arctan Chebyshev Polynomial Expansion x */
-void compute_chebyshev_arctan(double x, double *theta) 
+void compute_chebyshev_arctan(double o, double a, double *theta) 
 {
     /* ==== Arctan Chebyshev Polynomial Coefficients */
     const double coef_1 = 0.9993162682146682;
@@ -20,6 +21,12 @@ void compute_chebyshev_arctan(double x, double *theta)
     const double coef_5 = 0.14902466975931372;
     const double coef_7 = -0.04085799434591237;
 
+    if (a == 0) {
+        *theta = PI_OVER_2;
+        return;
+    }
+
+    const double x = o/a;
     const double x_sq = x * x;
     *theta = x * (
         coef_1 +
@@ -97,23 +104,27 @@ void compute_rotation_factors(double a, double b, double c, double d,
     double theta_sum;
     double theta_diff;
     
-    const double pi_over_2 = 1.5707963267948966;
+    const double num_sum = c + b;
+    const double den_sum = d - a;
 
-    if ((c + b) > (d - a)) {
-        compute_chebyshev_arctan((d - a)/(c + b), &theta);
+    const double num_diff = c - b;
+    const double den_diff = d + a;
+
+    if (num_sum > den_sum) {
+        compute_chebyshev_arctan(den_sum, num_sum, &theta);
         theta_sum = theta;
     } else {
-        compute_chebyshev_arctan((c + b)/(d - a), &theta);
-        theta_sum = pi_over_2 - theta;
-    } 
+        compute_chebyshev_arctan(num_sum, den_sum, &theta);
+        theta_sum = PI_OVER_2 - theta;
+    }
 
-    if ((c - b) > (d + a)) {
-        compute_chebyshev_arctan((d + a)/(c - b), &theta);
+    if (num_diff > den_diff) {
+        compute_chebyshev_arctan(den_diff, num_diff, &theta);
         theta_diff = theta;
     } else {
-        compute_chebyshev_arctan((c - b)/(d + a), &theta);
-        theta_diff = pi_over_2 - theta;
-    } 
+        compute_chebyshev_arctan(num_diff, den_diff, &theta);
+        theta_diff = PI_OVER_2 - theta;
+    }
 
     const double theta_l = 0.5 * (theta_sum - theta_diff);
     const double theta_r = 0.5 * (theta_sum + theta_diff);
