@@ -1,10 +1,6 @@
 /*
  * svd_angles.c   Rotation-angle / trig half of the Jacobi inner loop.
  *
- * OPTIMIZATION TARGET: this file is the transcendental bottleneck and the home
- * of the custom trig instruction + 2-issue firmware work.
- *
- * Current state: floating-point golden reference (atan2/sin/cos from math.h).
  * Fixed-point TODO: replace the bodies below with the approximation for
  * arctan/sin/cos and return cl/sl/cr/sr in Q(TRIG_SHIFT). sin and cos MUST be
  * computed with matched accuracy, or the rotation stops being orthogonal.
@@ -12,78 +8,86 @@
 #define PI_OVER_2 1.5707963267948966
 #include "svd_common.h"
 
-/* ==== Arctan Chebyshev Polynomial Expansion x */
-void compute_chebyshev_arctan(double o, double a, double *theta) 
+/* ==== Arctan piecewise-linear approximation, x = o/a in [-1, 1] */
+void compute_chebyshev_arctan(double o, double a, double *theta)
 {
-    /* ==== Arctan Chebyshev Polynomial Coefficients */
-    const double coef_1 = 0.9993162682146682;
-    const double coef_3 = -0.3222835041258624;
-    const double coef_5 = 0.14902466975931372;
-    const double coef_7 = -0.04085799434591237;
+    /* Breakpoints on [0, 1], step = 0.125 (8 segments, 9 points).
+     * bp_y[i] = atan(bp_x[i]). atan is odd, so we only need x >= 0
+     * here and flip the sign of the result at the end. */
+    static const double bp_x[9] = {
+        0.000, 0.125, 0.250, 0.375, 0.500, 0.625, 0.750, 0.875, 1.000
+    };
+    static const double bp_y[9] = {
+        0.000000000, 0.124354995, 0.244978663, 0.358770670, 0.463647609,
+        0.558599216, 0.643501109, 0.718830000, 0.785398163
+    };
 
     if (a == 0) {
         *theta = PI_OVER_2;
         return;
     }
 
-    const double x = o/a;
-    const double x_sq = x * x;
-    *theta = x * (
-        coef_1 +
-        x_sq * (
-            coef_3 +
-            x_sq * (
-                coef_5 +
-                x_sq * coef_7
-            )
-        )
-    );
+    const double x  = o / a;
+    const double ax = (x < 0.0) ? -x : x;
+
+    /* which segment does ax fall in? */
+    int i = (int)(ax / 0.125);
+    if (i > 7) i = 7;   /* clamp in case ax rounds up to exactly 1.0 */
+
+    /* linear interpolation between bp_x[i] and bp_x[i+1] */
+    const double slope  = (bp_y[i + 1] - bp_y[i]) / (bp_x[i + 1] - bp_x[i]);
+    const double result = bp_y[i] + slope * (ax - bp_x[i]);
+
+    *theta = (x < 0.0) ? -result : result;
 }
 
-/* ==== Cosine Taylor Series Expansion theta_x */
+/* ==== Cosine piecewise-linear approximation, theta in [-pi/2, pi/2] */
 void compute_taylor_cosine(double *cx, double theta_x)
 {
-    /* ==== Cosine Taylor Series Factorials
-        2! = 1*2 = 2
-        4! = 1*2*3*4 = 24
-        6! = 1*2*3*4*5*6 = 720
-    */
+    /* Breakpoints on [0, pi/2], step = pi/16 (8 segments, 9 points).
+     * cos is even, so we only need theta >= 0 here. */
+    static const double bp_t[9] = {
+        0.00000000, 0.19634954, 0.39269908, 0.58904862, 0.78539816,
+        0.98174770, 1.17809725, 1.37444679, 1.57079633
+    };
+    static const double bp_c[9] = {
+        1.00000000, 0.98078528, 0.92387953, 0.83146961, 0.70710678,
+        0.55557023, 0.38268343, 0.19509032, 0.00000000
+    };
 
-    /* ==== Cosine Taylor Series Coefficients */
-    const double coef_2 = -1.0 / 2.0;
-    const double coef_4 =  1.0 / 24.0;
-    const double coef_6 = -1.0 / 720.0;
+    double at = (theta_x < 0.0) ? -theta_x : theta_x;
 
-    const double theta_x_sq = theta_x * theta_x;
-    *cx = 1.0 + theta_x_sq * (
-        coef_2 + theta_x_sq * (
-            coef_4 + theta_x_sq * coef_6
-        )
-    );
+    int i = (int)(at / 0.19634954);
+    if (i > 7) i = 7;
+
+    const double slope = (bp_c[i + 1] - bp_c[i]) / (bp_t[i + 1] - bp_t[i]);
+    *cx = bp_c[i] + slope * (at - bp_t[i]);
 }
 
-/* ==== Sine Taylor Series Expansion theta_x */
-void compute_taylor_sine(double *sx, double theta_x) 
+/* ==== Sine piecewise-linear approximation, theta in [-pi/2, pi/2] */
+void compute_taylor_sine(double *sx, double theta_x)
 {
-    /* ==== Sine Taylor Series Factorials
-        3! = 1*2*3 = 6     
-        5! = 1*2*3*4*5 = 120    
-        7! = 1*2*3*4*5*6*7 = 5040
-    */
+    /* Same breakpoint grid as cosine above (must match, so cos/sin
+     * error is matched segment-for-segment). sin is odd, so we only
+     * need theta >= 0 here and flip the sign of the result at the end. */
+    static const double bp_t[9] = {
+        0.00000000, 0.19634954, 0.39269908, 0.58904862, 0.78539816,
+        0.98174770, 1.17809725, 1.37444679, 1.57079633
+    };
+    static const double bp_s[9] = {
+        0.00000000, 0.19509032, 0.38268343, 0.55557023, 0.70710678,
+        0.83146961, 0.92387953, 0.98078528, 1.00000000
+    };
 
-    /* ==== Sine Taylor Series Coefficients */
-    const double coef_3 = -1.0 / 6.0;
-    const double coef_5 =  1.0 / 120.0;
-    const double coef_7 = -1.0 / 5040.0;
-    
-    const double theta_x_sq = theta_x * theta_x;
-    *sx = theta_x * (
-        1.0 + theta_x_sq * (
-            coef_3 + theta_x_sq * (
-                coef_5 + theta_x_sq * coef_7
-            )
-        )
-    );
+    double at = (theta_x < 0.0) ? -theta_x : theta_x;
+
+    int i = (int)(at / 0.19634954);
+    if (i > 7) i = 7;
+
+    const double slope  = (bp_s[i + 1] - bp_s[i]) / (bp_t[i + 1] - bp_t[i]);
+    const double result = bp_s[i] + slope * (at - bp_t[i]);
+
+    *sx = (theta_x < 0.0) ? -result : result;
 }
 
 /*
@@ -97,13 +101,10 @@ void compute_rotation_factors(double a, double b, double c, double d,
                               double *cl, double *sl,
                               double *cr, double *sr)
 {
-    /* ==== OPT[trig]: two data-independent arctan evaluations.
-     * -> approximation for integer arctan (the custom instruction);
-     * schedule both across the two firmware issue slots to run concurrently. */
     double theta;
     double theta_sum;
     double theta_diff;
-    
+
     const double num_sum = c + b;
     const double den_sum = d - a;
 
@@ -129,10 +130,6 @@ void compute_rotation_factors(double a, double b, double c, double d,
     const double theta_l = 0.5 * (theta_sum - theta_diff);
     const double theta_r = 0.5 * (theta_sum + theta_diff);
 
-    /* ==== OPT[trig]: sin and cos must share accuracy to keep each rotation orthogonal.
-     * Pack two evaluations per microcycle in the 2-issue firmware. */
-
-    /* ==== Taylor Series Expansions */
     compute_taylor_cosine(cl, theta_l);
     compute_taylor_sine(sl, theta_l);
     compute_taylor_cosine(cr, theta_r);
