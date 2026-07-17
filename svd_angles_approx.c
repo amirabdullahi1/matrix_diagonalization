@@ -110,20 +110,20 @@ void compute_rotation_factors(double a, double b, double c, double d,
     const double num_diff = c - b;
     const double den_diff = d + a;
 
-    if (num_sum > den_sum) {
+    if (fabs(num_sum) > fabs(den_sum)) {
         compute_chebyshev_arctan(den_sum, num_sum, &theta);
-        theta_sum = theta;
+        theta_sum = PI_OVER_2 - theta;
     } else {
         compute_chebyshev_arctan(num_sum, den_sum, &theta);
-        theta_sum = PI_OVER_2 - theta;
+        theta_sum = theta;
     }
 
-    if (num_diff > den_diff) {
+    if (fabs(num_diff) > fabs(den_diff)) {
         compute_chebyshev_arctan(den_diff, num_diff, &theta);
-        theta_diff = theta;
+        theta_diff = PI_OVER_2 - theta;
     } else {
         compute_chebyshev_arctan(num_diff, den_diff, &theta);
-        theta_diff = PI_OVER_2 - theta;
+        theta_diff = theta;
     }
 
     const double theta_l = 0.5 * (theta_sum - theta_diff);
