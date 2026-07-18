@@ -162,3 +162,7 @@ void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
     compute_pla_cosine(cr, theta_r);
     compute_pla_sine(sr, theta_r);
 }
+
+int main (void) {
+    return 0;
+}
