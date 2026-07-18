@@ -13,12 +13,14 @@
 #define PI_OVER_2 3216
 #include "svd_common.h"
 
-static inline int16_t iabs16(int16_t x)
+static inline __attribute__((always_inline))
+int16_t iabs16(int16_t x)
 {
     return (x < 0) ? -x : x;
 }
 
 /* ==== Arctan piecewise-linear approximation, x = o/a in [-1, 1] */
+static inline __attribute__((always_inline))
 void compute_pla_arctan(int16_t o, int16_t a, int16_t *theta)
 {
     /* Breakpoints on [0, 1], step = 0.125 (8 segments, 9 points), Q11.
@@ -60,6 +62,7 @@ void compute_pla_arctan(int16_t o, int16_t a, int16_t *theta)
 }
 
 /* ==== Cosine piecewise-linear approximation, theta in [-pi/2, pi/2] */
+static inline __attribute__((always_inline))
 void compute_pla_cosine(int16_t *cx, int16_t theta_x)
 {
     /* Breakpoints on [0, pi/2], step = pi/16 (8 segments, 9 points), Q11.
@@ -88,6 +91,7 @@ void compute_pla_cosine(int16_t *cx, int16_t theta_x)
 }
 
 /* ==== Sine piecewise-linear approximation, theta in [-pi/2, pi/2] */
+static inline __attribute__((always_inline))
 void compute_pla_sine(int16_t *sx, int16_t theta_x)
 {
     /* Same breakpoint grid as cosine above (must match, so cos/sin
