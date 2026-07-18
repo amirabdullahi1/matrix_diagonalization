@@ -1,20 +1,19 @@
 /*
  * svd_common.h - shared configuration and the interface contract between
- * the two halves of the Jacobi inner loop.
+ * the two halves of the Jacobi inner loop (FIXED-POINT build).
  *
- * The inner loop is split at a natural seam. The ONLY data that crosses the
- * seam is the four rotation factors (cl, sl, cr, sr), so the two halves can be
- * developed and optimized independently and still link into one program:
+ *   compute_rotation_factors()   [svd_angles/svd_slopes_approx_int.c - Amir]
+ *       (a,b,c,d) int16  ->  cl,sl,cr,sr int16 (Q11)   piecewise-linear trig
  *
- *   compute_rotation_factors()   [svd_angles.c  - Amir]
- *       (a,b,c,d)  ->  cl, sl, cr, sr           (trig: arctan + sin/cos)
+ *   apply_rotations()            [svd_rotate.c - Param]
+ *       Q11 factors + int16 matrices  ->  rotated M, U, V   (MAC kernels)
  *
- *   apply_rotations()            [svd_rotate.c  - Param]
- *       cl,sl,cr,sr + matrices   ->  rotated M, U, V   (MAC kernels)
- *
- * The driver (svd_main.c) glues them together and runs the golden-reference
- * tests, so `make run` keeps validating the whole thing after either half
- * changes.
+ * Fixed-point layout:
+ *   M entries : raw signed integers (Q0)  -- the data matrix / singular values
+ *   U, V      : Q11 (value * 2048)        -- orthogonal factors, |entry| <= 1
+ *   cl,sl,... : Q11 rotation factors
+ * apply_rotations() applies the SAME `>> TRIG_SHIFT` to all three, because each
+ * MAC multiplies the operand by a Q11 factor (one Q11 scale to remove).
  */
 #ifndef SVD_COMMON_H
 #define SVD_COMMON_H
@@ -23,38 +22,29 @@
 #include <stdint.h>
 
 #define N 6                       // matrix dimension (6x6 per spec)
-#define MAX_SWEEPS 30             // hard cap on sweeps
-#define CONVERGENCE_EPS 1e-9      // off-diagonal Frobenius norm threshold
+#define MAX_SWEEPS 50             // hard cap on sweeps (fixed-point may need more)
+#define TRIG_SHIFT 11             // Q11: 1.0 == 2048  (matches trig PLA_SF)
+#define OFFDIAG_EPS 3             // convergence: max |off-diagonal| in raw units
 
 // 12-bit signed input range: each matrix entry lies in [-2048, 2047].
 #define INPUT_BITS 12
 #define INPUT_MIN  (-(1 << (INPUT_BITS - 1)))   // -2048
 #define INPUT_MAX  ((1 << (INPUT_BITS - 1)) - 1)//  2047
 
-/*
- * Fixed-point contract (used once you port off double precision; unused while
- * the reference stays in double). When Amir returns cl/sl/cr/sr as
- * Q(TRIG_SHIFT) integers, Param's MACs must rescale each product with
- * `>> TRIG_SHIFT`. Keep this the single source of truth for that shift so both
- * halves stay in agreement.
- *
- *   #define TRIG_SHIFT 11        // 1.0 represented as 2^11 (Q11)
- */
-
-typedef double mat_t[N][N];
+typedef int16_t mat_t[N][N];
 
 // ---- The seam ----------------------------------------------------------
 
-// [svd_angles.c] Rotation-angle + factor generation.
-// Input : the 2x2 block  a=M[p][p], b=M[p][q], c=M[q][p], d=M[q][q].
-// Output: left/right cosine & sine factors of the two rotation angles.
-void compute_rotation_factors(double a, double b, double c, double d,
-                              double *cl, double *sl,
-                              double *cr, double *sr);
+// [svd_angles/svd_slopes_approx_int.c / Amir] Rotation-angle + factor generation.
+// Input : the 2x2 block  a=M[p][p], b=M[p][q], c=M[q][p], d=M[q][q]  (raw int16).
+// Output: left/right cosine & sine factors in Q11.
+void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
+                              int16_t *cl, int16_t *sl,
+                              int16_t *cr, int16_t *sr);
 
-// [svd_rotate.c] Apply the left+right rotations to M and accumulate
-// them into U and V, using the factors from compute_rotation_factors().
+// [svd_rotate.c / Param] Apply the left+right rotations to M and accumulate
+// them into U and V, using the Q11 factors from compute_rotation_factors().
 void apply_rotations(mat_t M, mat_t U, mat_t V, int p, int q,
-                     double cl, double sl, double cr, double sr);
+                     int16_t cl, int16_t sl, int16_t cr, int16_t sr);
 
 #endif // SVD_COMMON_H

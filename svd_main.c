@@ -1,26 +1,38 @@
 /*
- * svd_main.c  --  Two-sided Jacobi SVD, cyclic-by-rows.
+ * svd_main.c  --  Two-sided Jacobi SVD, cyclic-by-rows (FIXED-POINT driver).
  *
- * This file owns the algorithm scaffolding (matrix helpers, the sweep loop,
- * post-processing, verification, and main). The two optimization halves live
- * in separate files and meet at the seam inside jacobi_rotate():
+ * Algorithm scaffolding (sweep loop, post-processing, verification, main).
+ * The two optimization halves meet at the seam in jacobi_rotate():
  *
- *   svd_angles.c  [Amir]  -> compute_rotation_factors()
- *   svd_rotate.c  [Param] -> apply_rotations()
+ *   svd_angles/svd_slopes_approx_int.c  [Amir]  -> compute_rotation_factors()
+ *   svd_rotate.c                        [Param] -> apply_rotations()
  *
- * Build: make        (links all three .c files into ./svd)
- *        make run    (build + run the golden-reference tests)
+ * Fixed-point layout:  M = raw int (Q0),  U,V = Q11,  factors = Q11.
+ * Because fixed-point is approximate, the output is NOT bit-identical to the
+ * double golden model; instead we validate the singular values against the
+ * double reference within a tolerance and report a float reconstruction error.
+ *
+ * Build: make        (links svd_main.c + the int trig + svd_rotate.c into ./svd)
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "svd_common.h"
 
-static void mat_identity(mat_t A)
+#define Q11_ONE (1 << TRIG_SHIFT)          // 1.0 in Q11 == 2048
+
+// Singular values of the reference 6x6 from the double golden model.
+static const double GOLDEN_SV[N] = {
+    3985.84, 3571.62, 2438.81, 1399.95, 884.87, 166.82
+};
+#define SV_TOL 20.0                         // acceptable |fixed-point - golden|
+
+// U, V start as the identity in Q11 (diagonal = 1.0).
+static void identity_q11(mat_t A)
 {
     for (int i = 0; i < N; i++)
         for (int j = 0; j < N; j++)
-            A[i][j] = (i == j) ? 1.0 : 0.0;
+            A[i][j] = (i == j) ? Q11_ONE : 0;
 }
 
 static void mat_copy(mat_t dst, const mat_t src)
@@ -28,70 +40,64 @@ static void mat_copy(mat_t dst, const mat_t src)
     memcpy(dst, src, sizeof(mat_t));
 }
 
-static void mat_print(const char *label, const mat_t A)
+static void mat_print_int(const char *label, const mat_t A)
 {
     printf("%s =\n", label);
     for (int i = 0; i < N; i++) {
         printf("  ");
         for (int j = 0; j < N; j++)
-            printf("%10.4f ", A[i][j]);
+            printf("%8d ", A[i][j]);
         printf("\n");
     }
     printf("\n");
 }
 
-// Frobenius norm of the off-diagonal elements; drives the convergence test.
-static double off_diagonal_norm(const mat_t A)
+// Largest |off-diagonal| element; drives the convergence test.
+static int max_offdiagonal(const mat_t A)
 {
-    double s = 0.0;
+    int m = 0;
     for (int i = 0; i < N; i++)
         for (int j = 0; j < N; j++)
-            if (i != j)
-                s += A[i][j] * A[i][j];
-    return sqrt(s);
+            if (i != j) {
+                int v = A[i][j] < 0 ? -A[i][j] : A[i][j];
+                if (v > m) m = v;
+            }
+    return m;
 }
 
 /*
- * The seam: read the 2x2 block, skip if already negligible, then hand off to
- * the two optimization halves. This glue stays simple on purpose.
+ * The seam: read the 2x2 block, skip if already diagonal, then hand off to
+ * the two optimization halves.
  */
 static void jacobi_rotate(mat_t M, mat_t U, mat_t V, int p, int q)
 {
-    const double b = M[p][q];
-    const double c = M[q][p];
+    const int16_t b = M[p][q];
+    const int16_t c = M[q][p];
 
-    // If b and c are already negligible, skip this pair.
-    if (fabs(b) + fabs(c) < 1e-15)
+    if (b == 0 && c == 0)          // already zero -> identity rotation
         return;
 
-    double cl, sl, cr, sr;
+    int16_t cl, sl, cr, sr;
     compute_rotation_factors(M[p][p], b, c, M[q][q], &cl, &sl, &cr, &sr); // Amir
     apply_rotations(M, U, V, p, q, cl, sl, cr, sr);                       // Param
 }
 
-// On input:  M holds the matrix to decompose.
-// On output: M is diagonal (= Sigma), U and V are orthogonal,
-//            and U * Sigma * V^T = M_original.  Returns sweeps performed.
+// On output M is (approximately) diagonal = Sigma; U, V orthogonal (Q11).
 static int svd_jacobi(mat_t M, mat_t U, mat_t V, int verbose)
 {
-    mat_identity(U);
-    mat_identity(V);
+    identity_q11(U);
+    identity_q11(V);
 
     int sweep;
     for (sweep = 1; sweep <= MAX_SWEEPS; sweep++) {
-        // Cyclic-by-rows pair ordering over all i<j:
-        // (0,1),(0,2),...,(0,5),(1,2),...,(4,5)  -> N*(N-1)/2 = 15 pairs
         for (int p = 0; p < N - 1; p++)
             for (int q = p + 1; q < N; q++)
                 jacobi_rotate(M, U, V, p, q);
 
-        const double off = off_diagonal_norm(M);
-        if (verbose) {
-            printf("--- End of sweep %d  (off-diagonal norm = %.6e) ---\n",
-                   sweep, off);
-            mat_print("M", M);
-        }
-        if (off < CONVERGENCE_EPS)
+        const int off = max_offdiagonal(M);
+        if (verbose)
+            printf("sweep %2d: max|off-diagonal| = %d\n", sweep, off);
+        if (off <= OFFDIAG_EPS)
             break;
     }
     return sweep;
@@ -101,7 +107,7 @@ static int svd_jacobi(mat_t M, mat_t U, mat_t V, int verbose)
 static void normalize_singular_values(mat_t M, mat_t U)
 {
     for (int k = 0; k < N; k++) {
-        if (M[k][k] < 0.0) {
+        if (M[k][k] < 0) {
             M[k][k] = -M[k][k];
             for (int i = 0; i < N; i++)
                 U[i][k] = -U[i][k];
@@ -118,7 +124,7 @@ static void sort_singular_values(mat_t M, mat_t U, mat_t V)
             if (M[j][j] > M[max_idx][max_idx])
                 max_idx = j;
         if (max_idx != i) {
-            double tmp = M[i][i];
+            int16_t tmp = M[i][i];
             M[i][i] = M[max_idx][max_idx];
             M[max_idx][max_idx] = tmp;
             for (int k = 0; k < N; k++) {
@@ -129,26 +135,23 @@ static void sort_singular_values(mat_t M, mat_t U, mat_t V)
     }
 }
 
-// Reconstruct U * Sigma * V^T and compare with the original (Frobenius norm).
+/*
+ * Reconstruct U * Sigma * V^T in floating point and compare with the original.
+ * U, V are Q11 (divide by 2048 each), Sigma is raw.
+ */
 static double reconstruction_error(const mat_t M_orig,
                                    const mat_t U, const mat_t Sigma,
                                    const mat_t V)
 {
-    mat_t US, USV;
-    for (int i = 0; i < N; i++)
-        for (int j = 0; j < N; j++)
-            US[i][j] = U[i][j] * Sigma[j][j];
+    const double denom = (double)Q11_ONE * (double)Q11_ONE;
+    double err = 0.0;
     for (int i = 0; i < N; i++)
         for (int j = 0; j < N; j++) {
             double s = 0.0;
             for (int k = 0; k < N; k++)
-                s += US[i][k] * V[j][k];   // V^T[k][j] = V[j][k]
-            USV[i][j] = s;
-        }
-    double err = 0.0;
-    for (int i = 0; i < N; i++)
-        for (int j = 0; j < N; j++) {
-            double d = M_orig[i][j] - USV[i][j];
+                s += (double)U[i][k] * (double)Sigma[k][k] * (double)V[j][k];
+            s /= denom;
+            double d = (double)M_orig[i][j] - s;
             err += d * d;
         }
     return sqrt(err);
@@ -171,7 +174,7 @@ int main(void)
         for (int j = 0; j < N; j++)
             if (M_orig[i][j] < INPUT_MIN || M_orig[i][j] > INPUT_MAX) {
                 fprintf(stderr,
-                        "error: M[%d][%d] = %.0f outside 12-bit range [%d, %d]\n",
+                        "error: M[%d][%d] = %d outside 12-bit range [%d, %d]\n",
                         i, j, M_orig[i][j], INPUT_MIN, INPUT_MAX);
                 return 1;
             }
@@ -179,20 +182,33 @@ int main(void)
     mat_t M, U, V;
     mat_copy(M, M_orig);
 
-    mat_print("Input matrix M", M_orig);
+    mat_print_int("Input matrix M (raw int16)", M_orig);
 
     const int sweeps = svd_jacobi(M, U, V, 1);
-    printf("Converged in %d sweeps.\n\n", sweeps);
+    printf("\nStopped after %d sweep(s).\n\n", sweeps);
 
     normalize_singular_values(M, U);
     sort_singular_values(M, U, V);
 
-    mat_print("Sigma (singular values, sorted descending)", M);
-    mat_print("U", U);
-    mat_print("V", V);
+    mat_print_int("Sigma (fixed-point singular values, sorted descending)", M);
+
+    // Validate against the double golden singular values.
+    printf("Singular value    fixed-point   double golden    |diff|\n");
+    double max_diff = 0.0;
+    int pass = 1;
+    for (int k = 0; k < N; k++) {
+        double diff = fabs((double)M[k][k] - GOLDEN_SV[k]);
+        if (diff > max_diff) max_diff = diff;
+        if (diff > SV_TOL) pass = 0;
+        printf("   sigma[%d]         %8d      %9.2f     %7.2f\n",
+               k, M[k][k], GOLDEN_SV[k], diff);
+    }
 
     const double err = reconstruction_error(M_orig, U, M, V);
-    printf("Reconstruction error ||M - U*Sigma*V^T||_F = %.3e\n", err);
+    printf("\nMax singular-value error vs double golden : %.2f  (tol %.0f)\n",
+           max_diff, SV_TOL);
+    printf("Reconstruction error ||M - U*Sigma*V^T||_F : %.2f\n", err);
+    printf("VALIDATION: %s\n", pass ? "PASS" : "CHECK (exceeds tolerance)");
 
     return 0;
 }

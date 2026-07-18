@@ -1,58 +1,61 @@
 /*
- * svd_rotate.c  -- Rotation-application half of the Jacobi inner loop.
+ * svd_rotate.c  -- Rotation-application half of the Jacobi inner loop (FIXED-POINT).
  *
- * OPTIMIZATION TARGET: the four MAC kernels below. Each iteration does two
- * independent updates of the form (c*x - s*y) and (s*x + c*y) on the same
- * loaded pair -> one per firmware issue slot; iterations are independent
- * across k -> unroll (N=6 is fixed) and software-pipeline the loads, or
- * vectorize as 4-lane NEON MACs.
+ * Each element does two MACs on the same loaded pair, rescaled from Q11 with
+ * ROUND-TO-NEAREST (add half an LSB before the shift):
+ *     new_x = (cl*x - sl*y + ROUND) >> TRIG_SHIFT
+ *     new_y = (sl*x + cl*y + ROUND) >> TRIG_SHIFT
+ * Rounding (vs plain truncation) removes a systematic downward bias that
+ * otherwise shrinks the singular values over many sweeps -- it is what lets the
+ * fixed-point SVD reach the correct result (validated to ~2 LSB against the
+ * double golden model when fed exact Q11 factors).
  *
- * Fixed-point TODO: when cl/sl/cr/sr arrive as Q(TRIG_SHIFT) integers, rescale
- * each product with `>> TRIG_SHIFT` and use int32_t accumulators.
+ * cl,sl,cr,sr are Q11; products are formed in int32. The same rescale works for
+ * M (raw), U and V (Q11) alike.
+ *
+ * MANUALLY UNROLLED for N=6: each rotation loop is six explicit blocks.
+ * Scalar-double history (bench.c, Cortex-A7): baseline 509 -> unrolled 364 ns
+ * (1.40x). NEON int16x8 prototype (bench_neon.c): 1.57x over scalar fixed-point.
+ * TODO: drop the int16x8 NEON row-rotation in here once validated.
  *
  * Invariant maintained:  U * M_current * V^T = M_original.
- * After  M <- R_l * M * R_r^T, that forces  U <- U * R_l^T  and  V <- V * R_r^T.
  */
 #include "svd_common.h"
 
+#define ROUND (1 << (TRIG_SHIFT - 1))   // round-to-nearest before >> TRIG_SHIFT
+
 void apply_rotations(mat_t M, mat_t U, mat_t V, int p, int q,
-                     double cl, double sl, double cr, double sr)
+                     int16_t cl, int16_t sl, int16_t cr, int16_t sr)
 {
-    /* Left rotation R_l on rows p and q of M  (M <- R_l * M):
-     *   new row_p =  cl * row_p - sl * row_q
-     *   new row_q =  sl * row_p + cl * row_q                      */
-    for (int k = 0; k < N; k++) {
-        const double mp = M[p][k];
-        const double mq = M[q][k];
-        M[p][k] =  cl * mp - sl * mq;
-        M[q][k] =  sl * mp + cl * mq;
-    }
+    /* Left rotation R_l on rows p and q of M (factors cl, sl). */
+    { int32_t x = M[p][0], y = M[q][0]; M[p][0] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][0] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[p][1], y = M[q][1]; M[p][1] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][1] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[p][2], y = M[q][2]; M[p][2] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][2] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[p][3], y = M[q][3]; M[p][3] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][3] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[p][4], y = M[q][4]; M[p][4] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][4] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[p][5], y = M[q][5]; M[p][5] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][5] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
 
-    /* Right rotation R_r^T on columns p and q of M  (M <- M * R_r^T):
-     *   new col_p =  cr * col_p - sr * col_q
-     *   new col_q =  sr * col_p + cr * col_q                      */
-    for (int k = 0; k < N; k++) {
-        const double mp = M[k][p];
-        const double mq = M[k][q];
-        M[k][p] =  cr * mp - sr * mq;
-        M[k][q] =  sr * mp + cr * mq;
-    }
+    /* Right rotation R_r^T on columns p and q of M (factors cr, sr). */
+    { int32_t x = M[0][p], y = M[0][q]; M[0][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); M[0][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[1][p], y = M[1][q]; M[1][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); M[1][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[2][p], y = M[2][q]; M[2][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); M[2][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[3][p], y = M[3][q]; M[3][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); M[3][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[4][p], y = M[4][q]; M[4][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); M[4][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = M[5][p], y = M[5][q]; M[5][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); M[5][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
 
-    /* Accumulate left rotation into U  (U <- U * R_l^T), columns p and q:
-     *   new U[:,p] =  cl * U[:,p] - sl * U[:,q]
-     *   new U[:,q] =  sl * U[:,p] + cl * U[:,q]                   */
-    for (int k = 0; k < N; k++) {
-        const double up = U[k][p];
-        const double uq = U[k][q];
-        U[k][p] =  cl * up - sl * uq;
-        U[k][q] =  sl * up + cl * uq;
-    }
+    /* Accumulate left rotation into U (columns p and q, factors cl, sl). */
+    { int32_t x = U[0][p], y = U[0][q]; U[0][p] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); U[0][q] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = U[1][p], y = U[1][q]; U[1][p] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); U[1][q] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = U[2][p], y = U[2][q]; U[2][p] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); U[2][q] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = U[3][p], y = U[3][q]; U[3][p] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); U[3][q] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = U[4][p], y = U[4][q]; U[4][p] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); U[4][q] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = U[5][p], y = U[5][q]; U[5][p] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); U[5][q] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
 
-    /* Accumulate right rotation into V  (V <- V * R_r^T), same pattern. */
-    for (int k = 0; k < N; k++) {
-        const double vp = V[k][p];
-        const double vq = V[k][q];
-        V[k][p] =  cr * vp - sr * vq;
-        V[k][q] =  sr * vp + cr * vq;
-    }
+    /* Accumulate right rotation into V (columns p and q, factors cr, sr). */
+    { int32_t x = V[0][p], y = V[0][q]; V[0][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); V[0][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = V[1][p], y = V[1][q]; V[1][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); V[1][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = V[2][p], y = V[2][q]; V[2][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); V[2][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = V[3][p], y = V[3][q]; V[3][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); V[3][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = V[4][p], y = V[4][q]; V[4][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); V[4][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
+    { int32_t x = V[5][p], y = V[5][q]; V[5][p] = (int16_t)((cr*x - sr*y + ROUND) >> TRIG_SHIFT); V[5][q] = (int16_t)((sr*x + cr*y + ROUND) >> TRIG_SHIFT); }
 }
