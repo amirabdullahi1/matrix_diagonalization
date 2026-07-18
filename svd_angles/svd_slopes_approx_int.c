@@ -55,7 +55,8 @@ void compute_pla_arctan(int16_t o, int16_t a, int16_t *theta)
     const int16_t result = bp_y[i] +
         (int16_t)(((int32_t)bp_slope[i] * (ax - bp_x[i])) >> PLA_SF);
 
-    *theta = (x < 0) ? -result : result;
+    const int16_t mask = x >> 15;
+    *theta = (int16_t)((result ^ mask) - mask);
 }
 
 /* ==== Cosine piecewise-linear approximation, theta in [-pi/2, pi/2] */
@@ -114,7 +115,8 @@ void compute_pla_sine(int16_t *sx, int16_t theta_x)
     const int16_t result = bp_s[i] +
         (int16_t)(((int32_t)bp_slope[i] * (at - bp_t[i])) >> PLA_SF);
 
-    *sx = (theta_x < 0) ? -result : result;
+    const int16_t mask = theta_x >> 15;
+    *sx = (int16_t)((result ^ mask) - mask);
 }
 
 /*
@@ -128,7 +130,6 @@ void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
                               int16_t *cl, int16_t *sl,
                               int16_t *cr, int16_t *sr)
 {
-    int16_t theta;
     int16_t theta_sum;
     int16_t theta_diff;
 
@@ -139,19 +140,17 @@ void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
     const int16_t den_diff = d + a;
 
     if (iabs16(num_sum) > iabs16(den_sum)) {
-        compute_pla_arctan(den_sum, num_sum, &theta);
-        theta_sum = PI_OVER_2 - theta;
+        compute_pla_arctan(den_sum, num_sum, &theta_sum);
+        theta_sum = PI_OVER_2 - theta_sum;
     } else {
-        compute_pla_arctan(num_sum, den_sum, &theta);
-        theta_sum = theta;
+        compute_pla_arctan(num_sum, den_sum, &theta_sum);
     }
 
     if (iabs16(num_diff) > iabs16(den_diff)) {
-        compute_pla_arctan(den_diff, num_diff, &theta);
-        theta_diff = PI_OVER_2 - theta;
+        compute_pla_arctan(den_diff, num_diff, &theta_diff);
+        theta_diff = PI_OVER_2 - theta_diff;
     } else {
-        compute_pla_arctan(num_diff, den_diff, &theta);
-        theta_diff = theta;
+        compute_pla_arctan(num_diff, den_diff, &theta_diff);
     }
 
     const int16_t theta_l = (theta_sum - theta_diff) / 2;
