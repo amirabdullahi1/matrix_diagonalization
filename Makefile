@@ -8,7 +8,7 @@
 #   make          build ./svd
 #   make run      build and run the tests
 #   make bench    build + run the apply_rotations microbenchmark
-#   make asm      disassemble svd_rotate.c for instruction counting
+#   make asm      disassemble svd_rotate.c and svd_slopes_approx_int.c for instruction counting
 #   make ref      build the frozen single-file reference (svdreference.c)
 #   make clean    remove binaries
 
@@ -48,17 +48,19 @@ bench: bench.c svd_rotate.c $(SPLIT_HDR)
 neon: bench_neon.c
 	$(CC) $(CFLAGS) -o bench_neon bench_neon.c $(LDLIBS)
 
-# Static instruction count for the rotation kernel: disassemble the object.
-asm: svd_rotate.c $(SPLIT_HDR)
+# Static instruction count for the rotation and trig kernels: disassemble the objects.
+asm: svd_rotate.c svd_angles/svd_slopes_approx_int.c $(SPLIT_HDR)
 	$(CC) $(CFLAGS) -c svd_rotate.c -o svd_rotate.o
 	objdump -d svd_rotate.o > svd_rotate.s
-	@echo "Disassembly written to svd_rotate.s -- count the apply_rotations block."
+	$(CC) $(CFLAGS) -c svd_angles/svd_slopes_approx_int.c -o svd_slopes_approx_int.o
+	objdump -d svd_slopes_approx_int.o > svd_slopes_approx_int.s
+	@echo "Disassembly written to svd_rotate.s and svd_slopes_approx_int.s -- count the respective blocks."
 
 # Frozen single-file golden reference, for diffing against the split build.
 ref: svdreference.c
 	$(CC) $(CFLAGS) -o svd_reference svdreference.c $(LDLIBS)
 
 clean:
-	rm -f svd svd_reference bench bench_neon svd_rotate.o svd_rotate.s
+	rm -f svd svd_reference bench bench_neon svd_rotate.o svd_rotate.s svd_slopes_approx_int.o svd_slopes_approx_int.s
 
 .PHONY: all run check bench asm neon ref clean
