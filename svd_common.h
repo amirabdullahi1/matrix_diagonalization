@@ -20,6 +20,7 @@
 #define SVD_COMMON_H
 
 #include <math.h>
+#include <stdint.h>
 
 #define N 6                       // matrix dimension (6x6 per spec)
 #define MAX_SWEEPS 30             // hard cap on sweeps
