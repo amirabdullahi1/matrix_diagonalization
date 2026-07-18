@@ -30,7 +30,6 @@ void compute_pla_arctan(int16_t o, int16_t a, int16_t *theta)
     static const int16_t bp_y[9] = {
         0, 254, 501, 734, 949, 1144, 1317, 1472, 1608
     };
-    /* slope[i] = (bp_y[i+1] - bp_y[i]) / (bp_x[i+1] - bp_x[i]), precomputed */
     static const int16_t bp_slope[8] = {
         2037, 1976, 1864, 1718, 1555, 1391, 1234, 1090
     };
@@ -70,7 +69,6 @@ void compute_pla_cosine(int16_t *cx, int16_t theta_x)
     static const int16_t bp_c[9] = {
         2048, 2008, 1892, 1702, 1448, 1137, 783, 399, 0
     };
-    /* slope[i] = (bp_c[i+1] - bp_c[i]) / (bp_t[i+1] - bp_t[i]), precomputed */
     static const int16_t bp_slope[8] = {
         -200, -593, -963, -1297, -1580, -1803, -1956, -2034
     };
@@ -78,8 +76,10 @@ void compute_pla_cosine(int16_t *cx, int16_t theta_x)
     int16_t at = iabs16(theta_x);
     if (at > PI_OVER_2) at = PI_OVER_2;   /* clamp */
 
-    /* which segment does at fall in? (402 = trunc(pi/16 * 2048)) */
-    int i = at / 402;
+    /* which segment does at fall in? (402 = trunc(pi/16 * 2048)) 
+     * i = at / 402, replaced with a multiply-shift (M=2609, S=20) 
+    * so no integer divide is needed. Exact match to floor(at/402). */
+    int i = ((int32_t)at * 2609) >> 20;
     if (i > 7) i = 7;
 
     *cx = bp_c[i] +
@@ -98,7 +98,6 @@ void compute_pla_sine(int16_t *sx, int16_t theta_x)
     static const int16_t bp_s[9] = {
         0, 399, 783, 1137, 1448, 1702, 1892, 2008, 2048
     };
-    /* slope[i] = (bp_s[i+1] - bp_s[i]) / (bp_t[i+1] - bp_t[i]), precomputed */
     static const int16_t bp_slope[8] = {
         2034, 1956, 1803, 1580, 1297, 963, 593, 200
     };
@@ -106,7 +105,10 @@ void compute_pla_sine(int16_t *sx, int16_t theta_x)
     int16_t at = iabs16(theta_x);
     if (at > PI_OVER_2) at = PI_OVER_2;   /* clamp */
 
-    int i = at / 402;
+    /* which segment does at fall in? (402 = trunc(pi/16 * 2048)) 
+     * i = at / 402, replaced with a multiply-shift (M=2609, S=20) 
+     * so no integer divide is needed. Exact match to floor(at/402). */
+    int i = ((int32_t)at * 2609) >> 20;
     if (i > 7) i = 7;
 
     const int16_t result = bp_s[i] +
