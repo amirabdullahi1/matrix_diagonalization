@@ -9,7 +9,7 @@
 #include "svd_common.h"
 
 /* ==== Arctan piecewise-linear approximation, x = o/a in [-1, 1] */
-void compute_chebyshev_arctan(double o, double a, double *theta)
+void compute_pla_arctan(double o, double a, double *theta)
 {
     /* Breakpoints on [0, 1], step = 0.125 (8 segments, 9 points).
      * bp_y[i] = atan(bp_x[i]). atan is odd, so we only need x >= 0
@@ -42,7 +42,7 @@ void compute_chebyshev_arctan(double o, double a, double *theta)
 }
 
 /* ==== Cosine piecewise-linear approximation, theta in [-pi/2, pi/2] */
-void compute_taylor_cosine(double *cx, double theta_x)
+void compute_pla_cosine(double *cx, double theta_x)
 {
     /* Breakpoints on [0, pi/2], step = pi/16 (8 segments, 9 points).
      * cos is even, so we only need theta >= 0 here. */
@@ -65,7 +65,7 @@ void compute_taylor_cosine(double *cx, double theta_x)
 }
 
 /* ==== Sine piecewise-linear approximation, theta in [-pi/2, pi/2] */
-void compute_taylor_sine(double *sx, double theta_x)
+void compute_pla_sine(double *sx, double theta_x)
 {
     /* Same breakpoint grid as cosine above (must match, so cos/sin
      * error is matched segment-for-segment). sin is odd, so we only
