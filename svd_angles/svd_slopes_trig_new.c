@@ -38,8 +38,7 @@ int16_t compute_pla_arctan(int16_t o, int16_t a)
 
     int16_t theta;
     if (a == 0) {
-        theta = PI_OVER_2;
-        return;
+        return PI_OVER_2;
     }
 
     /* Pre-scale o by 2048 before the divide so the quotient keeps its
