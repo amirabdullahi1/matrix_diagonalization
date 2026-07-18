@@ -21,17 +21,32 @@
  * Invariant maintained:  U * M_current * V^T = M_original.
  */
 #include "svd_common.h"
+#include <arm_neon.h>
 
 #define ROUND (1 << (TRIG_SHIFT - 1))   // round-to-nearest before >> TRIG_SHIFT
 
 void apply_rotations(mat_t M, mat_t U, mat_t V, int p, int q,
                      int16_t cl, int16_t sl, int16_t cr, int16_t sr)
 {
-    /* Left rotation R_l on rows p and q of M (factors cl, sl). */
-    { int32_t x = M[p][0], y = M[q][0]; M[p][0] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][0] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
-    { int32_t x = M[p][1], y = M[q][1]; M[p][1] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][1] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
-    { int32_t x = M[p][2], y = M[q][2]; M[p][2] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][2] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
-    { int32_t x = M[p][3], y = M[q][3]; M[p][3] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][3] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
+    /* Left rotation R_l on rows p and q of M (factors cl, sl).
+     * >>>> NEON TODO: THIS block (the six M[p][k]/M[q][k] rows) is the SIMD
+     * target -- M[p][.] and M[q][.] are contiguous, so replace these six scalar
+     * blocks with one int16x8 vectorized rotation. Port rot_neon() from
+     * bench_neon.c, using N=6 (load 8, use 6 -> handle the k=4,5 remainder or a
+     * 4+2 split). The three sections below (M columns, U, V) are column-STRIDED
+     * and stay scalar -- that's the documented layout finding.                 */
+    /* NEON: rotate M[p][0..3] and M[q][0..3] in one int16x4 widening MAC.
+     * vrshrn_n_s32 rounds, matching the scalar (+ ROUND) >> TRIG_SHIFT exactly. */
+    {
+        const int16x4_t vp  = vld1_s16(&M[p][0]);
+        const int16x4_t vq  = vld1_s16(&M[q][0]);
+        const int16x4_t clv = vdup_n_s16(cl), slv = vdup_n_s16(sl);
+        int32x4_t rp = vmlsl_s16(vmull_s16(vp, clv), vq, slv);   /* cl*mp - sl*mq */
+        int32x4_t rq = vmlal_s16(vmull_s16(vp, slv), vq, clv);   /* sl*mp + cl*mq */
+        vst1_s16(&M[p][0], vrshrn_n_s32(rp, TRIG_SHIFT));
+        vst1_s16(&M[q][0], vrshrn_n_s32(rq, TRIG_SHIFT));
+    }
+    /* remainder k = 4, 5 (scalar; a 6-wide row has 2 lanes past the vector) */
     { int32_t x = M[p][4], y = M[q][4]; M[p][4] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][4] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
     { int32_t x = M[p][5], y = M[q][5]; M[p][5] = (int16_t)((cl*x - sl*y + ROUND) >> TRIG_SHIFT); M[q][5] = (int16_t)((sl*x + cl*y + ROUND) >> TRIG_SHIFT); }
 
