@@ -38,15 +38,16 @@ run: svd
 check: svd
 	@./svd | grep -E "Max singular|Reconstruction|VALIDATION"
 
-# Microbenchmark for apply_rotations() (Param's kernel). Links only the
-# rotation half + the harness. Rebuild + rerun after each optimization.
+# Microbenchmark for apply_rotations() (Param's kernel). Builds AND runs.
 bench: bench.c svd_rotate.c $(SPLIT_HDR)
-	$(CC) $(CFLAGS) -o $@ bench.c svd_rotate.c $(LDLIBS)
+	$(CC) $(CFLAGS) -o bench bench.c svd_rotate.c $(LDLIBS)
+	./bench
 
-# NEON int16x8 rotation prototype (standalone). Needs -mfpu=neon, i.e. the
-# Cortex-A7 CFLAGS line above must be uncommented on the VM.
+# NEON int16x8 rotation prototype (standalone). Builds AND runs.
+# Needs -mfpu=neon (the Cortex-A7 CFLAGS line above, uncommented on the VM).
 neon: bench_neon.c
 	$(CC) $(CFLAGS) -o bench_neon bench_neon.c $(LDLIBS)
+	./bench_neon
 
 # Static instruction count for the rotation and trig kernels: disassemble the objects.
 asm: svd_rotate.c svd_angles/svd_slopes_approx_int.c $(SPLIT_HDR)
