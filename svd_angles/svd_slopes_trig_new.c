@@ -1,13 +1,15 @@
 /*
- * svd_angles.c   Rotation-angle / trig half of the Jacobi inner loop.
+ * svd_slopes_trig_new.c
  *
- * Fixed-point TODO: replace the bodies below with the approximation for
- * arctan/sin/cos and return cl/sl/cr/sr in Q(TRIG_SHIFT). sin and cos MUST be
- * computed with matched accuracy, or the rotation stops being orthogonal.
+ * Three NEW custom instructions instead of doing the trig math in software.
+ * Each obeys ARM's operand limit -- at most 2 inputs, 1 result:
  *
- * Q11 fixed point: every constant below is the real value multiplied by
- * 2^PLA_SF = 2048 with the fractional remainder truncated (matches a plain
- * (int16_t) cast, i.e. truncation toward zero).
+ *   EXECUTE_ARCTAN(o, a) -> theta   (2 in, 1 out)
+ *   EXECUTE_COS(theta)   -> cx      (1 in, 1 out)
+ *   EXECUTE_SIN(theta)   -> sx      (1 in, 1 out)
+ *
+ * This file documents the intended call site; it is deliberately NOT added
+ * to the Makefile's SPLIT_SRC and will not compile/link as-is.
  */
 #define PLA_SF 11
 #define PI_OVER_2 3216
