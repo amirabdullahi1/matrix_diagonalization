@@ -41,27 +41,27 @@ void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
     const int16_t den_diff = d + a;
 
     if (iabs16(num_sum) > iabs16(den_sum)) {
-        __asm__("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_sum) : "r"(den_sum), "r"(num_sum));
+        __asm__ __volatile__ ("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_sum) : "r"(den_sum), "r"(num_sum));
         theta_sum = PI_OVER_2 - theta_sum;
     } else {
-        __asm__("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_sum) : "r"(num_sum), "r"(den_sum));
+        __asm__ __volatile__ ("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_sum) : "r"(num_sum), "r"(den_sum));
     }
 
     if (iabs16(num_diff) > iabs16(den_diff)) {
-        __asm__("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_diff) : "r"(den_diff), "r"(num_diff));
+        __asm__ __volatile__("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_diff) : "r"(den_diff), "r"(num_diff));
         theta_diff = PI_OVER_2 - theta_diff;
     } else {
-        __asm__("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_diff) : "r"(num_diff), "r"(den_diff));
+        __asm__ __volatile__ ("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_diff) : "r"(num_diff), "r"(den_diff));
     }
 
     const int16_t theta_l = (theta_sum - theta_diff) / 2;
     const int16_t theta_r = (theta_sum + theta_diff) / 2;
 
     int16_t vcl, vsl, vcr, vsr;
-    __asm__("EXECUTE_COS %0, %1" : "=r"(vcl) : "r"(theta_l));
-    __asm__("EXECUTE_SIN %0, %1" : "=r"(vsl) : "r"(theta_l));
-    __asm__("EXECUTE_COS %0, %1" : "=r"(vcr) : "r"(theta_r));
-    __asm__("EXECUTE_SIN %0, %1" : "=r"(vsr) : "r"(theta_r));
+    __asm__ __volatile__ ("EXECUTE_COS %0, %1" : "=r"(vcl) : "r"(theta_l));
+    __asm__ __volatile__ ("EXECUTE_SIN %0, %1" : "=r"(vsl) : "r"(theta_l));
+    __asm__ __volatile__ ("EXECUTE_COS %0, %1" : "=r"(vcr) : "r"(theta_r));
+    __asm__ __volatile__ ("EXECUTE_SIN %0, %1" : "=r"(vsr) : "r"(theta_r));
     *cl = vcl;
     *sl = vsl;
     *cr = vcr;
