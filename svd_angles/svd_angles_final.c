@@ -47,7 +47,7 @@ static void compute_taylor_sine(int16_t *sx, int16_t theta_x)
     const int32_t x3 = qmul(x2, x);
     const int32_t x5 = qmul(x3, x2);
     const int32_t x7 = qmul(x5, x2);
-    *sx = (int16_t)(x - x3 / 6 + x5 / 120 - x7 / 5040);
+    *sx = (int16_t)(x - ((x3 * 10923) >> 16) + ((x5 * 8738) >> 20) - ((x7 * 3329) >> 24));
 }
 
 /* ==== Taylor cosine, theta_x in Q11, [-pi/2, pi/2]. */
@@ -57,7 +57,7 @@ static void compute_taylor_cosine(int16_t *cx, int16_t theta_x)
     const int32_t x2 = qmul(x, x);
     const int32_t x4 = qmul(x2, x2);
     const int32_t x6 = qmul(x4, x2);
-    *cx = (int16_t)((1 << PLA_SF) - (x2 >> 1) + x4 / 24 - x6 / 720);
+    *cx = (int16_t)((1 << PLA_SF) - (x2 >> 1) + ((x4 * 2731) >> 16) - ((x6 * 1456) >> 20));
 }
 
 /*
