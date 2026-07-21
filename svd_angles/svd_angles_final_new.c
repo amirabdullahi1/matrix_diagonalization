@@ -54,8 +54,8 @@ void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
         __asm__ __volatile__ ("EXECUTE_ARCTAN %0, %1, %2" : "=r"(theta_diff) : "r"(num_diff), "r"(den_diff));
     }
 
-    const int16_t theta_l = (theta_sum - theta_diff) / 2;
-    const int16_t theta_r = (theta_sum + theta_diff) / 2;
+    const int16_t theta_l = (theta_sum - theta_diff) >> 1;
+    const int16_t theta_r = (theta_sum + theta_diff) >> 1;
 
     int16_t vcl, vsl, vcr, vsr;
     __asm__ __volatile__ ("EXECUTE_COS %0, %1" : "=r"(vcl) : "r"(theta_l));
