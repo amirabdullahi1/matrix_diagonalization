@@ -57,7 +57,7 @@ static void compute_taylor_cosine(int16_t *cx, int16_t theta_x)
     const int32_t x2 = qmul(x, x);
     const int32_t x4 = qmul(x2, x2);
     const int32_t x6 = qmul(x4, x2);
-    *cx = (int16_t)((1 << PLA_SF) - x2 / 2 + x4 / 24 - x6 / 720);
+    *cx = (int16_t)((1 << PLA_SF) - (x2 >> 1) + x4 / 24 - x6 / 720);
 }
 
 /*
@@ -86,8 +86,8 @@ void compute_rotation_factors(int16_t a, int16_t b, int16_t c, int16_t d,
         compute_pla_arctan(num_diff, den_diff, &theta_diff);
     }
 
-    const int16_t theta_l = (theta_sum - theta_diff) / 2;
-    const int16_t theta_r = (theta_sum + theta_diff) / 2;
+    const int16_t theta_l = (theta_sum - theta_diff) >> 1;
+    const int16_t theta_r = (theta_sum + theta_diff) >> 1;
 
     compute_taylor_cosine(cl, theta_l);
     compute_taylor_sine(sl, theta_l);
