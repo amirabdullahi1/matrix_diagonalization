@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "svd_common.h"
 
 #define Q11_ONE (1 << TRIG_SHIFT)          // 1.0 in Q11 == 2048
@@ -88,7 +89,7 @@ static int svd_jacobi(mat_t M, mat_t U, mat_t V, int verbose)
     identity_q11(U);
     identity_q11(V);
 
-    int sweep;
+    int sweep, prev_off = 32767;
     for (sweep = 1; sweep <= MAX_SWEEPS; sweep++) {
         for (int p = 0; p < N - 1; p++)
             for (int q = p + 1; q < N; q++)
@@ -97,8 +98,12 @@ static int svd_jacobi(mat_t M, mat_t U, mat_t V, int verbose)
         const int off = max_offdiagonal(M);
         if (verbose)
             printf("sweep %2d: max|off-diagonal| = %d\n", sweep, off);
-        if (off <= OFFDIAG_EPS)
+        // Stop when below the threshold OR when the off-diagonal stops
+        // shrinking (it has hit the fixed-point rounding floor -- more sweeps
+        // only waste cycles).
+        if (off <= OFFDIAG_EPS || off >= prev_off)
             break;
+        prev_off = off;
     }
     return sweep;
 }
@@ -157,6 +162,24 @@ static double reconstruction_error(const mat_t M_orig,
     return sqrt(err);
 }
 
+// Print the reconstructed U * Sigma * V^T (rounded to int) for eyeball checking.
+static void print_reconstruction(const mat_t U, const mat_t Sigma, const mat_t V)
+{
+    const double denom = (double)Q11_ONE * (double)Q11_ONE;
+    printf("Reconstructed U*Sigma*V^T (rounded) =\n");
+    for (int i = 0; i < N; i++) {
+        printf("  ");
+        for (int j = 0; j < N; j++) {
+            double s = 0.0;
+            for (int k = 0; k < N; k++)
+                s += (double)U[i][k] * (double)Sigma[k][k] * (double)V[j][k];
+            printf("%8ld ", lround(s / denom));
+        }
+        printf("\n");
+    }
+    printf("\n");
+}
+
 int main(void)
 {
     // 6x6 input matrix; every entry is a 12-bit signed value in [-2048, 2047].
@@ -208,7 +231,28 @@ int main(void)
     printf("\nMax singular-value error vs double golden : %.2f  (tol %.0f)\n",
            max_diff, SV_TOL);
     printf("Reconstruction error ||M - U*Sigma*V^T||_F : %.2f\n", err);
-    printf("VALIDATION: %s\n", pass ? "PASS" : "CHECK (exceeds tolerance)");
+    printf("VALIDATION: %s\n\n", pass ? "PASS" : "CHECK (exceeds tolerance)");
+
+    // Show the orthogonal factors and the reconstruction vs the original.
+    mat_print_int("U (Q11 = value x 2048)", U);
+    mat_print_int("V (Q11 = value x 2048)", V);
+    print_reconstruction(U, M, V);
+    mat_print_int("Original M (should match the reconstruction)", M_orig);
+
+    // ---- Whole-SVD timing (single number, free of process-spawn noise) ----
+    const int REPS = 100000;
+    mat_t Mt, Ut, Vt;
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    for (int r = 0; r < REPS; r++) {
+        mat_copy(Mt, M_orig);
+        svd_jacobi(Mt, Ut, Vt, 0);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    double us = ((t1.tv_sec - t0.tv_sec) * 1e9 +
+                 (t1.tv_nsec - t0.tv_nsec)) / 1e3 / REPS;
+    printf("Whole-SVD timing: %.2f us/decomposition  (%d reps, %d sweeps each)\n",
+           us, REPS, sweeps);
 
     return 0;
 }
