@@ -21,8 +21,10 @@ LDLIBS  = -lm
 # CFLAGS += -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard
 CFLAGS += -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard
 
-# Fixed-point build: driver + Amir's Q11 piecewise-linear trig + Param's kernel.
-SPLIT_SRC = svd_main.c svd_angles/svd_slopes_approx_int.c svd_rotate.c
+# Fixed-point build: driver + Q11 Taylor-series trig + Param's kernel.
+# (Taylor sin/cos replaced the piecewise-linear ones, which contracted the unit
+#  circle ~0.38%/rotation and lost ~25% of the singular values. Now validates PASS.)
+SPLIT_SRC = svd_main.c svd_angles/svd_angles_taylor.c svd_rotate.c
 SPLIT_HDR = svd_common.h
 
 all: svd
